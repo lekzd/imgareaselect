@@ -91,7 +91,7 @@ $.imgAreaSelect = function (img, options) {
         position = 'absolute',
         
         /* X/Y coordinates of the starting point for move/resize operations */ 
-        startX, startY,
+        startX, startY, startWidth, startHeight,
         
         /* Horizontal and vertical scaling factors */
         scaleX, scaleY,
@@ -119,6 +119,11 @@ $.imgAreaSelect = function (img, options) {
 
         /* User agent */
         ua = navigator.userAgent,
+
+        /* Detect support of touch events */
+        supportsTouch = 'ontouchstart' in window || navigator.msMaxTouchPoints,
+        lastTouch0 = null,
+        lastTouch1 = null,
         
         /* Various helper variables used throughout the code */ 
         $p, d, i, o, w, h, adjusted;
@@ -735,6 +740,107 @@ $.imgAreaSelect = function (img, options) {
 
         return false;
     }
+
+
+    function copyTouchObject(touchObject) {
+        return {
+            pageX: touchObject.pageX,
+            pageY: touchObject.pageY
+        }
+    }
+
+    function touchEventsDistance(point1, point2) {
+        var xs = 0;
+        var ys = 0;
+
+        xs = point2.pageX - point1.pageX;
+        xs = xs * xs;
+
+        ys = point2.pageY - point1.pageY;
+        ys = ys * ys;
+
+        return Math.sqrt( xs + ys );
+    }
+
+
+    function imgTouchStart(event) {
+        var touches = event.originalEvent.touches;
+
+        if (touches[0] !== undefined)
+            lastTouch0 = copyTouchObject(touches[0]);
+
+        if (touches[1] !== undefined)
+            lastTouch1 = copyTouchObject(touches[1]);
+
+        startX = left + selection.x1;
+        startY = top + selection.y1;
+
+        startWidth = selection.width;
+        startHeight = selection.height;
+
+        event.stopPropagation();
+        event.preventDefault();
+        return false;
+    }
+
+    function imgTouchEnd(event) {
+        lastTouch0 = null;
+        lastTouch1 = null;
+        options.onSelectEnd(img, getSelection());
+    }
+
+    function imgTouchDrag(event) {
+        var touches = event.originalEvent.touches,
+            diffX = lastTouch0.pageX - touches[0].pageX,
+            diffY = lastTouch0.pageY - touches[0].pageY;
+
+        x1 = startX - diffX;
+        y1 = startY - diffY;
+    }    
+
+    function imgTouchZoom(event) {
+        var touches = event.originalEvent.touches,
+            distanceNow = touchEventsDistance(touches[1], touches[0]),
+            lastDistance = touchEventsDistance(lastTouch1, lastTouch0),
+            diffZoom = distanceNow - lastDistance,
+
+            offsetLeft = (diffZoom * scaleX),
+            offsetTop = (diffZoom * scaleY);
+
+        selection.width = startWidth + offsetLeft;
+        selection.height = startHeight + offsetTop;
+
+        x1 = startX - (offsetLeft / 2);
+        y1 = startY - (offsetTop / 2);
+    }
+
+    function imgTouchMove(event) {
+        var touches = event.originalEvent.touches,
+            isMultiTouch = touches.length > 1,
+            maxLeft, 
+            maxTop;
+
+        adjust();
+        
+        if (isMultiTouch)
+            imgTouchZoom(event);
+        else
+            imgTouchDrag(event);
+
+        if (x1 < left) x1 = left;
+        if (y1 < top) y1 = top;
+
+        maxLeft = left + (imgWidth * aspectRatio) - selection.width;
+        maxTop = top + (imgHeight * aspectRatio) - selection.height;
+
+        if (x1 > maxLeft) x1 = maxLeft;
+        if (y1 > maxTop) y1 = maxTop;
+
+        x2 = x1 + selection.width;
+        y2 = y1 + selection.height;
+
+        doResize();
+    }
     
     /**
      * Window resize event handler
@@ -986,6 +1092,12 @@ $.imgAreaSelect = function (img, options) {
         aspectRatio = (d = (options.aspectRatio || '').split(/:/))[0] / d[1];
 
         $img.add($outer).unbind('mousedown', imgMouseDown);
+
+        if (supportsTouch)
+            $outer.add($border)
+                .unbind('touchstart', imgTouchStart)
+                .unbind('touchmove', imgTouchMove)
+                .unbind('touchend', imgTouchEnd);
         
         if (options.disable || options.enable === false) {
             /* Disable the plugin */
@@ -1003,6 +1115,13 @@ $.imgAreaSelect = function (img, options) {
 
             if (!options.persistent)
                 $img.add($outer).mousedown(imgMouseDown);
+
+                if (supportsTouch)
+                    $outer.add($border)
+                        .bind('touchstart', imgTouchStart)
+                        .bind('touchmove', imgTouchMove)
+                        .bind('touchend', imgTouchEnd);
+
         }
         
         options.enable = options.disable = undefined;
@@ -1152,6 +1271,13 @@ $.imgAreaSelect = function (img, options) {
      */
     if (!imgLoaded && msie && msie >= 7)
         img.src = img.src;
+
+
+    /*
+     * Touch events support
+     */
+    if (supportsTouch)
+        $box.addClass('touch-support');
 };
 
 /**
